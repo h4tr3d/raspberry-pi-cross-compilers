@@ -66,7 +66,7 @@ helpfunction() {
 	echo ""
 	echo "Usage: $0 -g [GCC version] -o [Target Pi OS type] -V"
 	echo -e "\t-g GCC version you want to compile?: (7.1.0|7.2.0|7.3.0|7.4.0|7.5.0|8.1.0|8.2.0|8.3.0|8.4.0|9.1.0|9.2.0|9.3.0|9.4.0|10.1.0|10.2.0|10.3.0|11.1.0|11.2.0|13.2.0)"
-	echo -e "\t-o What's yours Target Raspberry Pi OS type?: (stretch|buster|bullseye)"
+	echo -e "\t-o What's yours Target Raspberry Pi OS type?: (stretch|buster|bullseye||focal)"
 	echo -e "\t-V Verbose output for debugging?"
 	echo ""
 	echo ""
@@ -125,6 +125,10 @@ elif [ "$RPIOS_TYPE" = "bullseye" ]; then
 	fi
 	GLIBC_VERSION=2.31
 	BINUTILS_VERSION=2.35.2
+elif [ "$RPIOS_TYPE" = "focal" ]; then
+	GCCBASE_VERSION=9.4.0
+	GLIBC_VERSION=2.31
+	BINUTILS_VERSION=2.34
 else
 	echo "Invalid argument value: $RPIOS_TYPE"
 	exit 1
@@ -153,14 +157,14 @@ ARCH=armv8-a+fp+simd
 TARGET=aarch64-linux-gnu
 #GDB_VERSION=10.2
 GDB_VERSION=13.2
-MAKE=${MAKE:-make}
+#MAKE=${MAKE:-make}
 BUILD_NATIVE=${BUILD_NATIVE:-0}
 
 #validate env variables
 if ! [[ "$GCC_VERSION" =~ ^(7.1.0|7.2.0|7.3.0|7.4.0|7.5.0|8.1.0|8.2.0|8.3.0|9.1.0|9.2.0|9.3.0|9.4.0|10.1.0|10.2.0|10.3.0|11.1.0|11.2.0|13.2.0)$ ]]; then exit 1; fi
-if ! [[ "$GCCBASE_VERSION" =~ ^(6.3.0|8.3.0|10.2.0)$ ]]; then exit 1; fi
+if ! [[ "$GCCBASE_VERSION" =~ ^(6.3.0|8.3.0|10.2.0|9.4.0)$ ]]; then exit 1; fi
 if ! [[ "$GLIBC_VERSION" =~ ^(2.24|2.28|2.31)$ ]]; then exit 1; fi
-if ! [[ "$BINUTILS_VERSION" =~ ^(2.28|2.31.1|2.35.2)$ ]]; then exit 1; fi
+if ! [[ "$BINUTILS_VERSION" =~ ^(2.28|2.31.1|2.35.2|2.34)$ ]]; then exit 1; fi
 if [ "$KERNEL" != "kernel8" ]; then exit 1; fi
 if [ "$ARCH" != "armv8-a+fp+simd" ]; then exit 1; fi
 if [ "$FOLDER_VERSION" != "64" ]; then exit 1; fi
@@ -172,6 +176,14 @@ echo "Downloading and Setting up build directories"
 DOWNLOADDIR=$BUILDDIR/build_toolchains
 INSTALLDIR=$BUILDDIR/cross-pi-gcc-$GCC_VERSION-$FOLDER_VERSION
 SYSROOTDIR=$BUILDDIR/cross-pi-gcc-$GCC_VERSION-$FOLDER_VERSION/$TARGET/libc
+
+if [ -z "$MAKE" ]; then
+	if [ -f "$BUILDDIR/host-tools/bin/make" ]; then
+		MAKE=$BUILDDIR/host-tools/bin/make
+	else
+		MAKE=make
+	fi
+fi
 
 #make dirs
 mkdir -p "$DOWNLOADDIR"
@@ -216,7 +228,7 @@ if [ ! -d "binutils-$BINUTILS_VERSION" ]; then
 fi
 if [ ! -d "glibc-$GLIBC_VERSION" ]; then
 	# Download patched Glibc 2.31 if GCC 10 series are being built
-	if [[ "$GCCBASE_VERSION" =~ ^10.* ]] && [ "$GLIBC_VERSION" = "2.31" ]; then
+	if ( [[ "$GCCBASE_VERSION" =~ ^10.* ]] || [[ "$GCCBASE_VERSION" =~ ^9.* ]]) && [ "$GLIBC_VERSION" = "2.31" ]; then
 		echo "Downloading patched Glibc v2.31!"
 		git clone https://sourceware.org/git/glibc.git --branch release/2.31/master
 		mv glibc glibc-$GLIBC_VERSION
@@ -226,6 +238,7 @@ if [ ! -d "glibc-$GLIBC_VERSION" ]; then
 	fi
 	cd glibc-$GLIBC_VERSION || exit
 	mkdir -p build
+
 	cd "$DOWNLOADDIR" || exit
 	#rm ./*.tar.* || true
 fi
@@ -290,7 +303,7 @@ $MAKE -s -j$(nproc) all-gcc
 $MAKE -s install-strip-gcc DESTDIR="$INSTALLDIR"
 if [ -n "$(ls -A "$DOWNLOADDIR"/glibc-$GLIBC_VERSION/build)" ]; then rm -rf "$DOWNLOADDIR"/glibc-$GLIBC_VERSION/build/*; fi
 cd "$DOWNLOADDIR"/glibc-$GLIBC_VERSION/build || exit
-../configure --prefix=/usr --build="$MACHTYPE" --host=$TARGET --target=$TARGET --with-arch=$ARCH --with-sysroot=/$TARGET/libc --with-build-sysroot="$SYSROOTDIR" --with-headers="$SYSROOTDIR"/usr/include --with-lib="$SYSROOTDIR"/usr/lib --disable-multilib libc_cv_forced_unwind=yes
+../configure --prefix=/usr --build="$MACHTYPE" --host=$TARGET --target=$TARGET --with-arch=$ARCH --with-sysroot=/$TARGET/libc --with-build-sysroot="$SYSROOTDIR" --with-headers="$SYSROOTDIR"/usr/include --with-lib="$SYSROOTDIR"/usr/lib --disable-multilib --disable-werror libc_cv_forced_unwind=yes
 set -x
 $MAKE install-bootstrap-headers=yes install-headers DESTDIR="$SYSROOTDIR"
 $MAKE -j$(nproc) csu/subdir_lib
